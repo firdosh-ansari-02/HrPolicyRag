@@ -11,28 +11,55 @@ message instead of continuing.
 # imports
 
 import json
-
-from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
+from portkey_ai import createHeaders, PORTKEY_GATEWAY_URL
 
 from hr_assistant import config
-
-# from hr_assistant.config import GUARD_MODEL_NAME
-
 from hr_assistant.logger import get_logger
 
 
 logger = get_logger(__name__)
 
+
 REFUSAL_MESSAGE = "Sorry, I can't help with that request."
 
-# private varibales , private methods 
+
+# ---------------------------------------------------------
+# Portkey provider configuration
+# ---------------------------------------------------------
+
+GUARD_PROVIDER = "@llm-guardrails"
 
 
-_guard_llm = ChatGroq(
-    model=config.GUARD_MODEL_NAME,
-    temperature=0,
-    model_kwargs={"response_format": {"type": "json_object"}},
-)
+# ---------------------------------------------------------
+# Guardrail LLM
+# ---------------------------------------------------------
+
+def get_guard_llm() -> ChatOpenAI:
+    """
+    Return the guardrail LLM routed through Portkey.
+    """
+
+    logger.info(
+        "Routing guardrail LLM calls through Portkey (provider=%s)",
+        GUARD_PROVIDER,
+    )
+
+    headers = createHeaders(
+        api_key=config.PORTKEY_API_KEY,
+        provider=GUARD_PROVIDER,
+    )
+
+    return ChatOpenAI(
+        api_key=config.PORTKEY_API_KEY,
+        base_url=PORTKEY_GATEWAY_URL,
+        model=config.GUARD_MODEL_NAME,
+        temperature=0,
+        default_headers=headers,
+    )
+
+
+_guard_llm = get_guard_llm()
 
 
 
@@ -108,41 +135,92 @@ EXAMPLES
 
 
 
-# check safety 
+# ---------------------------------------------------------
+# Safety check
+# ---------------------------------------------------------
 
-def _check_safety(text: str, policy: str) -> tuple[bool, str]:
-    """Return (is_safe, reason) for the given text under the given policy."""
+def _check_safety(text: str,policy: str,) -> tuple[bool, str]:
+    """
+    Check the given text against the supplied safety policy.
+
+    Returns:
+        (is_safe, reason)
+    """
+
     response = _guard_llm.invoke(
         [
-            {"role": "system", "content": policy},
-            {"role": "user", "content": text},
+            {
+                "role": "system",
+                "content": policy,
+            },
+            {
+                "role": "user",
+                "content": text,
+            },
         ]
     )
-    result = json.loads(response.content)
+
+    try:
+        result = json.loads(response.content)
+
+    except json.JSONDecodeError:
+        logger.error(
+            "Guardrail model returned invalid JSON: %s",
+            response.content,
+        )
+
+        # Fail closed if guardrail response is invalid.
+        return False, "Guardrail returned an invalid response."
+
     is_safe = result.get("violation", 0) == 0
     reason = result.get("rationale", "")
+
     return is_safe, reason
 
 
-# input safety 
-
+# ---------------------------------------------------------
+# Input safety
+# ---------------------------------------------------------
 
 def check_input(question: str) -> tuple[bool, str]:
-    """Check the user's question before the agent sees it."""
-    is_safe, reason = _check_safety(question, INPUT_POLICY)
+    """
+    Check the user's question before the agent sees it.
+    """
+
+    is_safe, reason = _check_safety(
+        question,
+        INPUT_POLICY,
+    )
+
     if not is_safe:
-        logger.warning("Input guard BLOCKED question: %s | reason: %s", question, reason)
+        logger.warning(
+            "Input guard BLOCKED question: %s | reason: %s",
+            question,
+            reason,
+        )
+
     return is_safe, reason
 
-#output safety
+
+# ---------------------------------------------------------
+# Output safety
+# ---------------------------------------------------------
 
 def check_output(answer: str) -> tuple[bool, str]:
-    """Check the agent's answer before showing it to the user."""
-    is_safe, reason = _check_safety(answer, OUTPUT_POLICY)
+    """
+    Check the agent's answer before showing it to the user.
+    """
+
+    is_safe, reason = _check_safety(
+        answer,
+        OUTPUT_POLICY,
+    )
+
     if not is_safe:
-        logger.warning("Output guard BLOCKED answer: %s | reason: %s", answer, reason)
+        logger.warning(
+            "Output guard BLOCKED answer: %s | reason: %s",
+            answer,
+            reason,
+        )
+
     return is_safe, reason
-
-
-
-

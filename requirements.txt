@@ -35,7 +35,7 @@ langchain-openai
 ## every gateway  -- gives you an openai compatible code 
 
 
-# evaluations 
+# evaluations - openevals is oss by langchain
 
 openevals
 
