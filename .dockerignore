@@ -16,7 +16,6 @@ logs/
 .git/
 .gitignore
 NOTES/
-rag.ipynb
 .ipynb_checkpoints/
 README.md
 docs/
