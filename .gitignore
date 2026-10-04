@@ -1,3 +1,8 @@
 myvenv
 .env
 logs
+.env.docker
+
+# AWS secrets 
+hr-rag_accessKeys.csv
+key-to-connect.pem
